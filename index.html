@@ -187,8 +187,8 @@
 			button.textContent = "Checking…";
 			try {
 				if (!window.crypto?.subtle) throw new Error("Secure browser hashing is unavailable. Open this page over HTTPS.");
-				const teamName = document.querySelector("#team").value.trim().toLowerCase();
-				const username = document.querySelector("#username").value.trim().toLowerCase();
+				const teamName = document.querySelector("#team").value.trim();
+				const username = document.querySelector("#username").value.trim();
 				const password = document.querySelector("#password").value;
 				const [usernameOnce, passwordHash] = await Promise.all([sha256Hex(username), sha256Hex(password)]);
 				const usernameHash = await sha256Hex(usernameOnce);
