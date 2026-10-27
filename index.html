@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="theme-color" content="#101a1a">
+	<title>Secret Psycher</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			--bg: #101a1a;
+			--panel: #192625;
+			--text: #f3f4e9;
+			--muted: #a9b7ae;
+			--accent: #b9e769;
+			--line: #344440;
+			--danger: #ffd1a8;
+		}
+		* { box-sizing: border-box; }
+		body {
+			min-height: 100vh;
+			margin: 0;
+			padding: 32px 18px;
+			display: grid;
+			place-items: center;
+			color: var(--text);
+			background: radial-gradient(ellipse at 50% 0%, #29413a 0, var(--bg) 55%);
+			font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		}
+		main { width: min(100%, 470px); }
+		.brand { margin-bottom: 24px; text-align: center; }
+		.mark { color: var(--accent); font-size: 13px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; }
+		h1 { margin: 8px 0; font-size: clamp(2.3rem, 10vw, 3.5rem); letter-spacing: -.06em; line-height: 1; }
+		.intro { margin: 12px 0 0; color: var(--muted); line-height: 1.6; }
+		.card { padding: clamp(22px, 6vw, 34px); border: 1px solid var(--line); border-radius: 22px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 24px 70px #0005; }
+		form { display: grid; gap: 17px; }
+		label { display: grid; gap: 7px; color: var(--muted); font-size: .9rem; font-weight: 650; }
+		input { width: 100%; padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; outline: none; background: #101a19; color: var(--text); font: inherit; }
+		input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #b9e76922; }
+		button { min-height: 48px; margin-top: 3px; border: 0; border-radius: 11px; background: var(--accent); color: #172014; font: inherit; font-weight: 800; cursor: pointer; }
+		button:hover { filter: brightness(1.06); }
+		button:disabled { cursor: wait; opacity: .65; }
+		.notice { margin: 20px 0 0; padding: 12px 14px; border: 1px solid #80684d; border-radius: 11px; color: var(--danger); font-size: .83rem; line-height: 1.5; }
+		.message { min-height: 1.4em; margin: 16px 0 0; color: var(--muted); font-size: .92rem; line-height: 1.5; }
+		.message.error { color: #ffaaa1; }
+		.message.success { color: var(--accent); }
+		.result { margin-top: 16px; padding: 20px; border-radius: 14px; background: #253630; text-align: center; }
+		.result span { display: block; color: var(--muted); font-size: .85rem; }
+		.result strong { display: block; margin-top: 6px; color: var(--accent); font-size: 1.75rem; }
+		.hidden { display: none; }
+		footer { margin-top: 18px; color: #83938a; font-size: .75rem; line-height: 1.5; text-align: center; }
+		@media (prefers-reduced-motion: no-preference) { button { transition: filter .15s ease; } }
+	</style>
+</head>
+<body>
+	<main>
+		<header class="brand">
+			<div class="mark"></div>
+			<h1>Secret Psycher</h1>
+			<p class="intro"></p>
+		</header>
+		<section class="card" aria-label="Find your Secret Psycher assignment">
+			<form id="loginForm" autocomplete="on">
+				<label for="team">Team
+					<input id="team" name="team" type="text" autocomplete="organization" required>
+				</label>
+				<label for="username">Username
+					<input id="username" name="username" type="text" autocomplete="username" required>
+				</label>
+				<label for="password">Password
+					<input id="password" name="password" type="password" autocomplete="current-password" required>
+				</label>
+				<button id="submitButton" type="submit">submit</button>
+			</form>
+			<p id="message" class="message" role="status" aria-live="polite"></p>
+			<div id="result" class="result hidden" aria-live="polite"><span>Your Secret Psycher person is</span><strong id="assignedName"></strong></div>
+		</section>
+		<footer></footer>
+	</main>
+	<script>
+		const ROSTER_URL = "./psycherList.txt";
+		const EXAMPLE_TEAMS = new Set(["listname1", "listname2"]);
+		const form = document.querySelector("#loginForm");
+		const message = document.querySelector("#message");
+		const result = document.querySelector("#result");
+		const button = document.querySelector("#submitButton");
+
+		function sha256Hex(value) {
+			return crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)).then(bytes =>
+				Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("")
+			);
+		}
+
+		// Supported roster formats:
+		// JSON: {"teams":{"Team name":[[doubleUserHash, firstName, passwordHash, assignedByHash, assignedToHash]]}}
+		// Text: [Team name] on its own line, followed by pipe- or tab-separated rows in that same field order.
+		// Backend output: Team name: {(doubleUserHash,firstName,passwordHash,assignedByHash,assignedToHash), ...}
+		function parseTupleRows(content) {
+			const users = [];
+			const remaining = content.replace(/\(([^()]*)\)/g, (tuple, fields) => {
+				const user = fields.split(",").map(value => value.trim());
+				if (user.length !== 5) throw new Error("Roster format not recognized. Each roster entry must contain five fields.");
+				users.push(user);
+				return "";
+			});
+			if (remaining.replace(/[\s,]/g, "")) {
+				throw new Error("Roster format not recognized. Expected parenthesized roster entries.");
+			}
+			return users;
+		}
+
+		function parseRoster(text) {
+			const trimmed = text.trim();
+			if (!trimmed) throw new Error("The roster file is empty.");
+			const startsWithTextHeading = /^\[[^\]\r\n]+\](?:\r?\n|$)/.test(trimmed);
+			if (trimmed.startsWith("{") || (trimmed.startsWith("[") && !startsWithTextHeading)) {
+				const parsed = JSON.parse(trimmed);
+				const teams = parsed.teams || parsed;
+				return Object.entries(teams).map(([name, entries]) => ({
+					name,
+					users: Array.isArray(entries) ? entries.map(row => Array.isArray(row) ? row : [row.usernameHash, row.firstName, row.passwordHash, row.assignedByHash, row.assignedToHash]) : []
+				}));
+			}
+			const teams = [];
+			let current = null;
+			let readingTupleRoster = false;
+			let tupleRosterContent = "";
+			for (const rawLine of text.split(/\r?\n/)) {
+				const line = rawLine.trim();
+				if (readingTupleRoster) {
+					const closingBrace = line.indexOf("}");
+					if (closingBrace === -1) {
+						tupleRosterContent += `${line} `;
+						continue;
+					}
+					tupleRosterContent += line.slice(0, closingBrace);
+					current.users.push(...parseTupleRows(tupleRosterContent));
+					if (line.slice(closingBrace + 1).trim()) {
+						throw new Error("Roster format not recognized after a team roster.");
+					}
+					current = null;
+					readingTupleRoster = false;
+					tupleRosterContent = "";
+					continue;
+				}
+				if (!line || line.startsWith("#")) continue;
+				const tupleHeading = line.match(/^(.+?)\s*:\s*\{(.*)$/);
+				if (tupleHeading) {
+					current = { name: tupleHeading[1].trim(), users: [] };
+					teams.push(current);
+					const closingBrace = tupleHeading[2].indexOf("}");
+					if (closingBrace === -1) {
+						tupleRosterContent = tupleHeading[2];
+						readingTupleRoster = true;
+					} else {
+						current.users.push(...parseTupleRows(tupleHeading[2].slice(0, closingBrace)));
+						if (tupleHeading[2].slice(closingBrace + 1).trim()) {
+							throw new Error("Roster format not recognized after a team roster.");
+						}
+						current = null;
+					}
+					continue;
+				}
+				const heading = line.match(/^\[([^\]]+)\]$/);
+				if (heading) {
+					current = { name: heading[1].trim(), users: [] };
+					teams.push(current);
+					continue;
+				}
+				if (!current) throw new Error("Roster format not recognized. Add a [Team name] heading before its rows.");
+				current.users.push(line.split(line.includes("\t") ? "\t" : "|", 5).map(value => value.trim()));
+			}
+			if (readingTupleRoster) throw new Error("Roster format not recognized. A team roster is missing its closing brace.");
+			return teams;
+		}
+
+		function setMessage(text, type = "") {
+			message.textContent = text;
+			message.className = `message ${type}`;
+		}
+
+		form.addEventListener("submit", async event => {
+			event.preventDefault();
+			result.classList.add("hidden");
+			setMessage("");
+			button.disabled = true;
+			button.textContent = "Checking…";
+			try {
+				if (!window.crypto?.subtle) throw new Error("Secure browser hashing is unavailable. Open this page over HTTPS.");
+				const teamName = document.querySelector("#team").value.trim();
+				const username = document.querySelector("#username").value.trim();
+				const password = document.querySelector("#password").value;
+				const [usernameOnce, passwordHash] = await Promise.all([sha256Hex(username), sha256Hex(password)]);
+				const usernameHash = await sha256Hex(usernameOnce);
+				const response = await fetch(ROSTER_URL, { cache: "no-store" });
+				if (!response.ok) throw new Error("Could not load the roster. Check that psycherList.txt is published with this page.");
+				const teams = parseRoster(await response.text());
+				const team = teams.find(item => item.name.toLowerCase() === teamName.toLowerCase() && !EXAMPLE_TEAMS.has(item.name.toLowerCase()));
+				if (!team) throw new Error("Team not found. Check the team name and try again.");
+				const users = team.users.filter(row => Array.isArray(row) && row.length >= 5);
+				const person = users.find(row => String(row[0]).toLowerCase() === usernameHash && String(row[2]).toLowerCase() === passwordHash);
+				if (!person) throw new Error("Those details didn’t match this team’s roster.");
+				const assignedUsernameHash = await sha256Hex(String(person[4]));
+				const assignedPerson = users.find(row => String(row[0]).toLowerCase() === assignedUsernameHash.toLowerCase());
+				if (!assignedPerson || !assignedPerson[1]) throw new Error("Your assignment could not be found. Please contact your team organizer.");
+				document.querySelector("#assignedName").textContent = String(assignedPerson[1]);
+				result.classList.remove("hidden");
+				setMessage("You’re all set. Keep it a secret!", "success");
+				form.reset();
+			} catch (error) {
+				setMessage(error instanceof SyntaxError ? "The roster file contains invalid JSON." : error.message || "Something went wrong.", "error");
+			} finally {
+				button.disabled = false;
+				button.textContent = "Reveal my person";
+			}
+		});
+	</script>
+</body>
+</html>
