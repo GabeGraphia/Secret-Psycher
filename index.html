@@ -125,7 +125,8 @@
 			let current = null;
 			let readingTupleRoster = false;
 			let tupleRosterContent = "";
-			for (const rawLine of text.split(/\r?\n/)) {
+			const rosterLines = text.replace(/}[ \t]*(?=[^\r\n{}]+:[ \t]*\{)/g, "}\n").split(/\r?\n/);
+			for (const rawLine of rosterLines) {
 				const line = rawLine.trim();
 				if (readingTupleRoster) {
 					const closingBrace = line.indexOf("}");
